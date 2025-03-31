@@ -1,127 +1,133 @@
 import React, { useState, useEffect } from 'react'
-import axios from 'axios'
+import personsService from './services/persons'
+import Notification from './components/Notification'
+import './App.css'
 
-// Filter component
-const Filter = ({ filter, handleFilterChange }) => (
-  <div>
-    filter shown with{' '}
-    <input value={filter} onChange={handleFilterChange} />
-  </div>
-)
-
-// PersonForm component
-const PersonForm = ({
-  addPerson,
-  newName,
-  handleNameChange,
-  newNumber,
-  handleNumberChange
-}) => (
-  <form onSubmit={addPerson}>
-    <div>
-      name:{' '}
-      <input
-        value={newName}
-        onChange={handleNameChange}
-      />
-    </div>
-    <div>
-      number:{' '}
-      <input
-        value={newNumber}
-        onChange={handleNumberChange}
-      />
-    </div>
-    <div>
-      <button type="submit">add</button>
-    </div>
-  </form>
-)
-
-// Persons component
-const Persons = ({ personsToShow }) => (
-  <div>
-    {personsToShow.map(person => (
-      <p key={person.id}>
-        {person.name} {person.number}
-      </p>
-    ))}
-  </div>
-)
-
-// App (root) component
 const App = () => {
   const [persons, setPersons] = useState([])
   const [newName, setNewName] = useState('')
   const [newNumber, setNewNumber] = useState('')
   const [filter, setFilter] = useState('')
+  const [notificationMessage, setNotificationMessage] = useState(null)
 
-  // Fetch data from server when the component mounts
   useEffect(() => {
-    axios
-      .get('http://localhost:3001/persons')
-      .then(response => {
-        // response.data is the array of persons from db.json
-        setPersons(response.data)
+    personsService
+      .getAll()
+      .then(initialPersons => {
+        setPersons(initialPersons)
       })
+      .catch(error => console.error('Error fetching persons:', error))
   }, [])
 
-  // Handler for adding a new person
-  const addPerson = (event) => {
-    event.preventDefault()
-
-    // Check if the name already exists
-    if (persons.some(person => person.name === newName)) {
-      alert(`${newName} is already added to phonebook`)
-      return
-    }
-
-    const newPerson = {
-      name: newName,
-      number: newNumber,
-      // The server will generate an id automatically if you use a POST request later,
-      // but for now we can just keep this as a placeholder if needed.
-    }
-
-    setPersons(persons.concat(newPerson))
-    setNewName('')
-    setNewNumber('')
+  const showNotification = (message) => {
+    setNotificationMessage(message)
+    setTimeout(() => {
+      setNotificationMessage(null)
+    }, 5000)
   }
 
-  // Handlers for controlled inputs
-  const handleNameChange = (event) => setNewName(event.target.value)
-  const handleNumberChange = (event) => setNewNumber(event.target.value)
-  const handleFilterChange = (event) => setFilter(event.target.value)
+  const addPerson = (event) => {
+    event.preventDefault()
+    const existingPerson = persons.find(
+      p => p.name.toLowerCase() === newName.toLowerCase()
+    )
 
-  // Filter the persons based on the filter string
-  const personsToShow = filter === ''
-    ? persons
-    : persons.filter(person =>
+    if (existingPerson) {
+      if (window.confirm(
+        `${existingPerson.name} is already added to the phonebook. Replace the old number with a new one?`
+      )) {
+        const changedPerson = { ...existingPerson, number: newNumber }
+        personsService
+          .update(existingPerson.id, changedPerson)
+          .then(returnedPerson => {
+            setPersons(persons.map(p => p.id !== existingPerson.id ? p : returnedPerson))
+            showNotification(`Updated ${returnedPerson.name}`)
+            setNewName('')
+            setNewNumber('')
+          })
+          .catch(error => {
+            console.error('Error updating person:', error)
+          })
+      }
+    } else {
+      const newPerson = { name: newName, number: newNumber }
+      personsService
+        .create(newPerson)
+        .then(returnedPerson => {
+          setPersons(persons.concat(returnedPerson))
+          showNotification(`Added ${returnedPerson.name}`)
+          setNewName('')
+          setNewNumber('')
+        })
+        .catch(error => {
+          console.error('Error creating person:', error)
+        })
+    }
+  }
+
+  const handleDelete = (id, name) => {
+    if (window.confirm(`Delete ${name}?`)) {
+      personsService
+        .removePerson(id)
+        .then(() => {
+          setPersons(persons.filter(person => person.id !== id))
+          showNotification(`Deleted ${name}`)
+        })
+        .catch(error => {
+          console.error(`Failed to delete ${name}`, error)
+        })
+    }
+  }
+
+  const personsToShow = filter
+    ? persons.filter(person =>
         person.name.toLowerCase().includes(filter.toLowerCase())
       )
+    : persons
 
   return (
     <div>
       <h2>Phonebook</h2>
 
-      <Filter
-        filter={filter}
-        handleFilterChange={handleFilterChange}
-      />
+      <Notification message={notificationMessage} />
+
+      <div>
+        Filter shown with{' '}
+        <input 
+          value={filter} 
+          onChange={e => setFilter(e.target.value)} 
+          placeholder="Enter name to filter" 
+        />
+      </div>
 
       <h3>Add a new</h3>
-
-      <PersonForm
-        addPerson={addPerson}
-        newName={newName}
-        handleNameChange={handleNameChange}
-        newNumber={newNumber}
-        handleNumberChange={handleNumberChange}
-      />
+      <form onSubmit={addPerson}>
+        <div>
+          Name: <input 
+                  value={newName} 
+                  onChange={e => setNewName(e.target.value)} 
+                />
+        </div>
+        <div>
+          Number: <input 
+                    value={newNumber} 
+                    onChange={e => setNewNumber(e.target.value)} 
+                  />
+        </div>
+        <div>
+          <button type="submit">add</button>
+        </div>
+      </form>
 
       <h3>Numbers</h3>
-
-      <Persons personsToShow={personsToShow} />
+      {personsToShow.map(person => (
+        <div key={person.id}>
+          {person.name} {person.number}{' '}
+          <button onClick={() => handleDelete(person.id, person.name)}>
+            delete
+          </button>
+        </div>
+      ))}
     </div>
   )
 }
